@@ -119,6 +119,11 @@ export type ThreadType = {
 	messages: ChatMessage[];
 	filesWithUserChanges: Set<string>;
 
+	// Branching fields (minimal for testing)
+	parentThreadId?: string; // Link to parent thread
+	branchNote?: string; // Simple note about why this branch was created
+	branchCreatedAtMessageIdx?: number; // Message index where this branch was created
+
 	// this doesn't need to go in a state object, but feels right
 	state: {
 		currCheckpointIdx: number | null; // the latest checkpoint we're at (null if not at a particular checkpoint, like if the chat is streaming, or chat just finished and we haven't clicked on a checkpt)
@@ -218,7 +223,11 @@ const newThreadObject = () => {
 			focusedMessageIdx: undefined,
 			linksOfMessageIdx: {},
 		},
-		filesWithUserChanges: new Set()
+		filesWithUserChanges: new Set(),
+		// Branching fields (optional, so they can be undefined for new threads)
+		parentThreadId: undefined,
+		branchNote: undefined,
+		branchCreatedAtMessageIdx: undefined
 	} satisfies ThreadType
 }
 
@@ -243,6 +252,12 @@ export interface IChatThreadService {
 	// thread selector
 	deleteThread(threadId: string): void;
 	duplicateThread(threadId: string): void;
+
+	// branching (minimal for testing)
+	createBranch(branchNote: string): void;
+	switchToParentThread(): void;
+	getBranchHistory(threadId: string): ThreadType[];
+	getBranchesAtMessageIdx(threadId: string, messageIdx: number): ThreadType[];
 
 	// exposed getters/setters
 	// these all apply to current thread
@@ -1877,7 +1892,93 @@ We only need to do it for files that were edited since `from`, ie files between 
 		this._setCurrentMessageState(newState, messageIdx)
 	}
 
+	// branching (minimal for testing)
+	createBranch(branchNote: string): void {
+		const currentThread = this.getCurrentThread();
+		
+		// Get the current message index (where we're branching from)
+		const currentMessageIdx = currentThread.messages.length;
+		
+		// Create new branch thread with proper typing
+		const newBranch: ThreadType = {
+			...newThreadObject(),
+			parentThreadId: currentThread.id,
+			branchNote: branchNote,
+			branchCreatedAtMessageIdx: currentMessageIdx
+		};
+		
+		// Add branch note as first message
+		const branchNoteMessage: ChatMessage = {
+			role: 'assistant',
+			displayContent: `🌿 **Branch created**\n\n${branchNote}`,
+			reasoning: `Branch created from parent thread ${currentThread.id}`,
+			anthropicReasoning: null
+		};
+		
+		newBranch.messages = [branchNoteMessage];
+		
+		// Add to threads and switch to new branch
+		const newThreads = {
+			...this.state.allThreads,
+			[newBranch.id]: newBranch
+		};
+		
+		this._storeAllThreads(newThreads);
+		this._setState({ 
+			allThreads: newThreads, 
+			currentThreadId: newBranch.id 
+		});
+	}
 
+	switchToParentThread(): void {
+		const currentThread = this.getCurrentThread();
+		if (!currentThread.parentThreadId) return;
+		
+		// Add a note to the current branch about returning to parent
+		const returnNote: ChatMessage = {
+			role: 'assistant',
+			displayContent: `🔙 **Returned to main thread**\n\nYou can return to this branch anytime from the thread list.`,
+			reasoning: `User navigated back to parent thread ${currentThread.parentThreadId}`,
+			anthropicReasoning: null
+		};
+		
+		this._addMessageToThread(currentThread.id, returnNote);
+		
+		// Switch to parent thread
+		this.switchToThread(currentThread.parentThreadId);
+	}
+
+	getBranchHistory(threadId: string): ThreadType[] {
+		const allThreads = this.state.allThreads;
+		const branches: ThreadType[] = [];
+		
+		// Find all threads that have this thread as their parent
+		for (const thread of Object.values(allThreads)) {
+			if (thread && thread.parentThreadId === threadId) {
+				branches.push(thread);
+			}
+		}
+		
+		// Sort by creation date (newest first)
+		return branches.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+	}
+
+	getBranchesAtMessageIdx(threadId: string, messageIdx: number): ThreadType[] {
+		const allThreads = this.state.allThreads;
+		const branches: ThreadType[] = [];
+		
+		// Find all threads that were created at this specific message index
+		for (const thread of Object.values(allThreads)) {
+			if (thread && 
+				thread.parentThreadId === threadId && 
+				thread.branchCreatedAtMessageIdx === messageIdx) {
+				branches.push(thread);
+			}
+		}
+		
+		// Sort by creation date (newest first)
+		return branches.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+	}
 
 }
 

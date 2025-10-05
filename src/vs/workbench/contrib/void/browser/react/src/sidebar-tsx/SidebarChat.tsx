@@ -16,13 +16,15 @@ import { ErrorDisplay } from './ErrorDisplay.js';
 import { BlockCode, TextAreaFns, VoidCustomDropdownBox, VoidInputBox2, VoidSlider, VoidSwitch, VoidDiffEditor } from '../util/inputs.js';
 import { ModelDropdown, } from '../void-settings-tsx/ModelDropdown.js';
 import { PastThreadsList } from './SidebarThreadSelector.js';
+import { BranchHistory } from './BranchHistory.js';
+import { BranchMarker } from './BranchMarker.js';
 import { VOID_CTRL_L_ACTION_ID } from '../../../actionIDs.js';
 import { VOID_OPEN_SETTINGS_ACTION_ID } from '../../../voidSettingsPane.js';
 import { ChatMode, displayInfoOfProviderName, FeatureName, isFeatureNameDisabled } from '../../../../../../../workbench/contrib/void/common/voidSettingsTypes.js';
 import { ICommandService } from '../../../../../../../platform/commands/common/commands.js';
 import { WarningBox } from '../void-settings-tsx/WarningBox.js';
 import { getModelCapabilities, getIsReasoningEnabledState } from '../../../../common/modelCapabilities.js';
-import { AlertTriangle, File, Ban, Check, ChevronRight, Dot, FileIcon, Pencil, Undo, Undo2, X, Flag, Copy as CopyIcon, Info, CirclePlus, Ellipsis, CircleEllipsis, Folder, ALargeSmall, TypeOutline, Text } from 'lucide-react';
+import { AlertTriangle, File, Ban, Check, ChevronRight, Dot, FileIcon, Pencil, Undo, Undo2, X, Flag, Copy as CopyIcon, Info, CirclePlus, Ellipsis, CircleEllipsis, Folder, ALargeSmall, TypeOutline, Text, GitBranch, ArrowLeft } from 'lucide-react';
 import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage } from '../../../../common/chatThreadServiceTypes.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, ToolName, LintErrorItem, ToolApprovalType, toolApprovalTypes } from '../../../../common/toolsServiceTypes.js';
 import { CopyButton, EditToolAcceptRejectButtonsHTML, IconShell1, JumpToFileButton, JumpToTerminalButton, StatusIndicator, StatusIndicatorForApplyButton, useApplyStreamState, useEditToolStreamState } from '../markdown/ApplyBlockHoverButtons.js';
@@ -2448,6 +2450,98 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 };
 
 
+const BranchButton = ({ threadId }: { threadId: string }) => {
+	const [showBranchModal, setShowBranchModal] = useState(false);
+	const [branchNote, setBranchNote] = useState('');
+	const accessor = useAccessor();
+	const chatThreadsService = accessor.get('IChatThreadService');
+
+	const handleCreateBranch = () => {
+		if (branchNote.trim()) {
+			chatThreadsService.createBranch(branchNote.trim());
+			setBranchNote('');
+			setShowBranchModal(false);
+		}
+	};
+
+	return (
+		<>
+			<button
+				onClick={() => setShowBranchModal(true)}
+				className="flex items-center gap-1 px-2 py-1 text-xs bg-void-bg-3 hover:bg-void-bg-4 rounded border border-void-stroke-1"
+				data-tooltip-id='void-tooltip'
+				data-tooltip-content='Create a focused branch conversation'
+				data-tooltip-place='top'
+			>
+				<GitBranch size={10} />
+				Branch
+			</button>
+			
+			{/* Simple branch modal */}
+			{showBranchModal && (
+				<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+					<div className="bg-void-bg-2 border border-void-stroke-1 rounded p-4 w-80">
+						<h3 className="text-sm font-medium mb-3">Create Branch</h3>
+						<div className="space-y-3">
+							<div>
+								<label className="block text-xs font-medium mb-1">What are you branching out to explore?</label>
+								<textarea
+									value={branchNote}
+									onChange={(e) => setBranchNote(e.target.value)}
+									placeholder="e.g., 'research authentication patterns' or 'implement user login'"
+									className="w-full p-2 text-xs bg-void-bg-3 border border-void-stroke-1 rounded h-20 resize-none"
+									autoFocus
+								/>
+							</div>
+							
+							<div className="flex gap-2">
+								<button
+									onClick={handleCreateBranch}
+									disabled={!branchNote.trim()}
+									className="flex-1 px-3 py-1 text-xs bg-void-accent hover:bg-void-accent-hover text-white rounded disabled:opacity-50"
+								>
+									Create Branch
+								</button>
+								<button
+									onClick={() => {
+										setShowBranchModal(false);
+										setBranchNote('');
+									}}
+									className="px-3 py-1 text-xs bg-void-bg-3 hover:bg-void-bg-4 rounded border border-void-stroke-1"
+								>
+									Cancel
+								</button>
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
+		</>
+	);
+};
+
+const BackToMainButton = ({ threadId }: { threadId: string }) => {
+	const accessor = useAccessor();
+	const chatThreadsService = accessor.get('IChatThreadService');
+
+	const handleBackToMain = () => {
+		chatThreadsService.switchToParentThread();
+	};
+
+	return (
+		<button
+			onClick={handleBackToMain}
+			className="flex items-center gap-1 px-2 py-1 text-xs bg-void-bg-3 hover:bg-void-bg-4 rounded border border-void-stroke-1"
+			data-tooltip-id='void-tooltip'
+			data-tooltip-content='Return to main thread'
+			data-tooltip-place='top'
+		>
+			<ArrowLeft size={10} />
+			Back to Main
+		</button>
+	);
+};
+
 const Checkpoint = ({ message, threadId, messageIdx, isCheckpointGhost, threadIsRunning }: { message: CheckpointEntry, threadId: string; messageIdx: number, isCheckpointGhost: boolean, threadIsRunning: boolean }) => {
 	const accessor = useAccessor()
 	const chatThreadService = accessor.get('IChatThreadService')
@@ -2459,8 +2553,13 @@ const Checkpoint = ({ message, threadId, messageIdx, isCheckpointGhost, threadIs
 		return !!Object.keys(streamState).find((threadId2) => streamState[threadId2]?.isRunning)
 	}, [isRunning, streamState])
 
+	// Check if this is the latest checkpoint in a main thread (good place to branch)
+	const currentThread = chatThreadService.getCurrentThread()
+	const isMainThread = !currentThread.parentThreadId
+	const isLatestCheckpoint = messageIdx === (chatThreadService.state.allThreads[threadId]?.messages.length ?? 0) - 1
+
 	return <div
-		className={`flex items-center justify-center px-2 `}
+		className={`flex items-center justify-center px-2 gap-2`}
 	>
 		<div
 			className={`
@@ -2488,6 +2587,16 @@ const Checkpoint = ({ message, threadId, messageIdx, isCheckpointGhost, threadIs
 		>
 			Checkpoint
 		</div>
+		
+		{/* Branch button - only show on latest checkpoint of main thread */}
+		{isMainThread && isLatestCheckpoint && !isCheckpointGhost && !isDisabled && (
+			<BranchButton threadId={threadId} />
+		)}
+		
+		{/* Back to Main button - always show in branch threads */}
+		{!isMainThread && !isCheckpointGhost && !isDisabled && (
+			<BackToMainButton threadId={threadId} />
+		)}
 	</div>
 }
 
@@ -2897,6 +3006,9 @@ export const SidebarChat = () => {
 
 	const selections = currentThread.state.stagingSelections
 	const setSelections = (s: StagingSelectionItem[]) => { chatThreadsService.setCurrentThreadState({ stagingSelections: s }) }
+	
+	// Tab state
+	const [activeTab, setActiveTab] = useState<'chat' | 'branches'>('chat');
 
 	// stream state
 	const currThreadStreamState = useChatThreadsStreamState(chatThreadsState.currentThreadId)
@@ -2969,7 +3081,7 @@ export const SidebarChat = () => {
 		// const lastMessageIdx = previousMessages.findLastIndex(v => v.role !== 'checkpoint')
 		// tool request shows up as Editing... if in progress
 		return previousMessages.map((message, i) => {
-			return <ChatBubble
+			const messageElement = <ChatBubble
 				key={i}
 				currCheckpointIdx={currCheckpointIdx}
 				chatMessage={message}
@@ -2978,9 +3090,25 @@ export const SidebarChat = () => {
 				chatIsRunning={isRunning}
 				threadId={threadId}
 				_scrollToBottom={() => scrollToBottom(scrollContainerRef)}
-			/>
+			/>;
+			
+			// Check if there are any branches created at this message index
+			const branchesAtThisMessage = chatThreadsService.getBranchesAtMessageIdx(threadId, i);
+			
+			if (branchesAtThisMessage.length > 0) {
+				return (
+					<div key={i}>
+						{messageElement}
+						{branchesAtThisMessage.map((branch, branchIdx) => (
+							<BranchMarker key={`branch-${branch.id}-${branchIdx}`} branch={branch} />
+						))}
+					</div>
+				);
+			}
+			
+			return messageElement;
 		})
-	}, [previousMessages, threadId, currCheckpointIdx, isRunning])
+	}, [previousMessages, threadId, currCheckpointIdx, isRunning, chatThreadsService])
 
 	const streamingChatIdx = previousMessagesHTML.length
 	const currStreamingMessageHTML = reasoningSoFar || displayContentSoFar || isRunning ?
@@ -3049,6 +3177,7 @@ export const SidebarChat = () => {
 				<WarningBox className='text-sm my-2 mx-4' onClick={() => { commandService.executeCommand(VOID_OPEN_SETTINGS_ACTION_ID) }} text='Open settings' />
 			</div>
 		}
+		
 	</ScrollToBottomContainer>
 
 
@@ -3165,7 +3294,6 @@ export const SidebarChat = () => {
 		ref={sidebarRef}
 		className='w-full h-full flex flex-col overflow-hidden'
 	>
-
 		<ErrorBoundary>
 			{messagesHTML}
 		</ErrorBoundary>
@@ -3175,12 +3303,50 @@ export const SidebarChat = () => {
 	</div>
 
 
+	// Tab header component
+	const tabHeader = (
+		<div className="flex border-b border-void-stroke-1 bg-void-bg-1">
+			<button
+				onClick={() => setActiveTab('chat')}
+				className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+					activeTab === 'chat' 
+						? 'border-void-accent text-void-fg-1' 
+						: 'border-transparent text-void-fg-3 hover:text-void-fg-2'
+				}`}
+			>
+				Chat
+			</button>
+			{!currentThread.parentThreadId && chatThreadsService.getBranchHistory(currentThread.id).length > 0 && (
+				<button
+					onClick={() => setActiveTab('branches')}
+					className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+						activeTab === 'branches' 
+							? 'border-void-accent text-void-fg-1' 
+							: 'border-transparent text-void-fg-3 hover:text-void-fg-2'
+					}`}
+				>
+					Branch History ({chatThreadsService.getBranchHistory(currentThread.id).length})
+				</button>
+			)}
+		</div>
+	);
+
+	// Tab content
+	const tabContent = activeTab === 'chat' ? (
+		isLandingPage ? landingPageContent : threadPageContent
+	) : (
+		<div className="flex flex-col h-full">
+			<div className="flex-1 overflow-y-auto p-4">
+				<BranchHistory threadId={currentThread.id} />
+			</div>
+		</div>
+	);
+
 	return (
-		<Fragment key={threadId} // force rerender when change thread
+		<Fragment key={currentThread.id} // force rerender when change thread
 		>
-			{isLandingPage ?
-				landingPageContent
-				: threadPageContent}
+			{tabHeader}
+			{tabContent}
 		</Fragment>
 	)
 }

@@ -217,6 +217,11 @@ const PastThreadElement = ({ pastThread, idx, hoveredIdx, setHoveredIdx, isRunni
 		firstMsg = '""';
 	}
 
+	// Show branch note if this is a branch
+	if (pastThread.parentThreadId && pastThread.branchNote) {
+		firstMsg = `🌿 ${pastThread.branchNote}`;
+	}
+
 	const numMessages = pastThread.messages.filter((msg) => msg.role === 'assistant' || msg.role === 'user').length;
 
 	const detailsHTML = <span
