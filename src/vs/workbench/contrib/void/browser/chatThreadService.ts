@@ -254,7 +254,7 @@ export interface IChatThreadService {
 	duplicateThread(threadId: string): void;
 
 	// branching (minimal for testing)
-	createBranch(branchNote: string): void;
+	createBranch(branchNote: string): Promise<void>;
 	switchToParentThread(): void;
 	getBranchHistory(threadId: string): ThreadType[];
 	getBranchesAtMessageIdx(threadId: string, messageIdx: number): ThreadType[];
@@ -1893,7 +1893,7 @@ We only need to do it for files that were edited since `from`, ie files between 
 	}
 
 	// branching (minimal for testing)
-	createBranch(branchNote: string): void {
+	async createBranch(branchNote: string): Promise<void> {
 		const currentThread = this.getCurrentThread();
 		
 		// Get the current message index (where we're branching from)
@@ -1907,11 +1907,14 @@ We only need to do it for files that were edited since `from`, ie files between 
 			branchCreatedAtMessageIdx: currentMessageIdx
 		};
 		
-		// Add branch note as first message
+		// Generate contextual summary for the branch
+		const contextSummary = this.generateSimpleContextSummary(currentThread.messages, branchNote);
+		
+		// Add contextual summary as first message
 		const branchNoteMessage: ChatMessage = {
 			role: 'assistant',
-			displayContent: `🌿 **Branch created**\n\n${branchNote}`,
-			reasoning: `Branch created from parent thread ${currentThread.id}`,
+			displayContent: contextSummary,
+			reasoning: `Branch created from parent thread ${currentThread.id} with contextual summary`,
 			anthropicReasoning: null
 		};
 		
@@ -1934,17 +1937,7 @@ We only need to do it for files that were edited since `from`, ie files between 
 		const currentThread = this.getCurrentThread();
 		if (!currentThread.parentThreadId) return;
 		
-		// Add a note to the current branch about returning to parent
-		const returnNote: ChatMessage = {
-			role: 'assistant',
-			displayContent: `🔙 **Returned to main thread**\n\nYou can return to this branch anytime from the thread list.`,
-			reasoning: `User navigated back to parent thread ${currentThread.parentThreadId}`,
-			anthropicReasoning: null
-		};
-		
-		this._addMessageToThread(currentThread.id, returnNote);
-		
-		// Switch to parent thread
+		// Switch to parent thread (no need for a message since we have the Back to Main button)
 		this.switchToThread(currentThread.parentThreadId);
 	}
 
@@ -1978,6 +1971,43 @@ We only need to do it for files that were edited since `from`, ie files between 
 		
 		// Sort by creation date (newest first)
 		return branches.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+	}
+
+	private generateSimpleContextSummary(messages: ChatMessage[], branchFocus: string): string {
+		// Simple context generation without external service dependency
+		const messagesWithContent = messages.filter(m => 
+			'displayContent' in m && typeof m.displayContent === 'string'
+		);
+		
+		if (messagesWithContent.length === 0) {
+			return `🌿 **Branch created**\n\n${branchFocus}`;
+		}
+		
+		// Extract recent context
+		const recentMessages = messagesWithContent.slice(-3);
+		const recentContext = recentMessages
+			.map(m => m.displayContent.substring(0, 100) + (m.displayContent.length > 100 ? '...' : ''))
+			.join(' | ');
+		
+		// Extract key topics
+		const allText = messagesWithContent.map(m => m.displayContent).join(' ').toLowerCase();
+		const commonTopics = [
+			'authentication', 'database', 'api', 'frontend', 'backend', 'testing',
+			'deployment', 'security', 'performance', 'ui/ux', 'architecture',
+			'components', 'functions', 'classes', 'modules', 'configuration'
+		];
+		
+		const topics = commonTopics.filter(topic => allText.includes(topic)).slice(0, 5);
+		
+		return `## Context for: ${branchFocus}
+
+**Current State:** ${recentContext || 'Starting fresh conversation'}
+
+**Key Topics Discussed:** ${topics.join(', ') || 'General discussion'}
+
+**Focus Area:** This branch will explore ${branchFocus.toLowerCase()} in detail, building on the current conversation context.
+
+**Next Steps:** Ready to dive deep into ${branchFocus.toLowerCase()} with full context of the current project state.`;
 	}
 
 }

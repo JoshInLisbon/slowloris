@@ -2450,19 +2450,28 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 };
 
 
-const BranchButton = ({ threadId }: { threadId: string }) => {
-	const [showBranchModal, setShowBranchModal] = useState(false);
-	const [branchNote, setBranchNote] = useState('');
-	const accessor = useAccessor();
-	const chatThreadsService = accessor.get('IChatThreadService');
+	const BranchButton = ({ threadId }: { threadId: string }) => {
+		const [showBranchModal, setShowBranchModal] = useState(false);
+		const [branchNote, setBranchNote] = useState('');
+		const [isCreatingBranch, setIsCreatingBranch] = useState(false);
+		const accessor = useAccessor();
+		const chatThreadsService = accessor.get('IChatThreadService');
 
-	const handleCreateBranch = () => {
-		if (branchNote.trim()) {
-			chatThreadsService.createBranch(branchNote.trim());
-			setBranchNote('');
-			setShowBranchModal(false);
-		}
-	};
+		const handleCreateBranch = async () => {
+			if (branchNote.trim() && !isCreatingBranch) {
+				setIsCreatingBranch(true);
+				try {
+					await chatThreadsService.createBranch(branchNote.trim());
+					setBranchNote('');
+					setShowBranchModal(false);
+				} catch (error) {
+					console.error('Failed to create branch:', error);
+					// Could show a notification here
+				} finally {
+					setIsCreatingBranch(false);
+				}
+			}
+		};
 
 	return (
 		<>
@@ -2497,17 +2506,21 @@ const BranchButton = ({ threadId }: { threadId: string }) => {
 							<div className="flex gap-2">
 								<button
 									onClick={handleCreateBranch}
-									disabled={!branchNote.trim()}
-									className="flex-1 px-3 py-1 text-xs bg-void-accent hover:bg-void-accent-hover text-white rounded disabled:opacity-50"
+									disabled={!branchNote.trim() || isCreatingBranch}
+									className="flex-1 px-3 py-1 text-xs bg-void-accent hover:bg-void-accent-hover text-white rounded disabled:opacity-50 flex items-center justify-center gap-2"
 								>
-									Create Branch
+									{isCreatingBranch && (
+										<div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
+									)}
+									{isCreatingBranch ? 'Creating...' : 'Create Branch'}
 								</button>
 								<button
 									onClick={() => {
 										setShowBranchModal(false);
 										setBranchNote('');
 									}}
-									className="px-3 py-1 text-xs bg-void-bg-3 hover:bg-void-bg-4 rounded border border-void-stroke-1"
+									disabled={isCreatingBranch}
+									className="px-3 py-1 text-xs bg-void-bg-3 hover:bg-void-bg-4 rounded border border-void-stroke-1 disabled:opacity-50"
 								>
 									Cancel
 								</button>
@@ -3009,6 +3022,14 @@ export const SidebarChat = () => {
 	
 	// Tab state
 	const [activeTab, setActiveTab] = useState<'chat' | 'branches'>('chat');
+	
+	// Auto-switch to chat tab when navigating to a branch thread
+	useEffect(() => {
+		// If we're in a branch thread, always show the chat tab
+		if (currentThread.parentThreadId) {
+			setActiveTab('chat');
+		}
+	}, [currentThread.id, currentThread.parentThreadId]);
 
 	// stream state
 	const currThreadStreamState = useChatThreadsStreamState(chatThreadsState.currentThreadId)
