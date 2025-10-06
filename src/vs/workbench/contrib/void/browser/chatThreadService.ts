@@ -12,9 +12,9 @@ import { URI } from '../../../../base/common/uri.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { ILLMMessageService } from '../common/sendLLMMessageService.js';
 import { chat_userMessageContent, isABuiltinToolName } from '../common/prompt/prompts.js';
-import { AnthropicReasoning, getErrorMessage, RawToolCallObj, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
+import { AnthropicReasoning, getErrorMessage, RawToolCallObj, RawToolParamsObj, LLMChatMessage } from '../common/sendLLMMessageTypes.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
-import { FeatureName, ModelSelection, ModelSelectionOptions } from '../common/voidSettingsTypes.js';
+import { FeatureName, ModelSelection, ModelSelectionOptions, ChatMode, OverridesOfModel } from '../common/voidSettingsTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, ToolCallParams, ToolName, ToolResult } from '../common/toolsServiceTypes.js';
 import { IToolsService } from './toolsService.js';
@@ -1897,7 +1897,22 @@ We only need to do it for files that were edited since `from`, ie files between 
 		const currentThread = this.getCurrentThread();
 		
 		// Get the current message index (where we're branching from)
-		const currentMessageIdx = currentThread.messages.length;
+		// The branch should be anchored to the last LLM response, since branches always follow LLM responses
+		// Find the last assistant message index
+		let lastAssistantMessageIdx = -1;
+		for (let i = currentThread.messages.length - 1; i >= 0; i--) {
+			if (currentThread.messages[i].role === 'assistant') {
+				lastAssistantMessageIdx = i;
+				break;
+			}
+		}
+		// If no assistant message found, use the last message index
+		const currentMessageIdx = lastAssistantMessageIdx >= 0 ? lastAssistantMessageIdx : currentThread.messages.length - 1;
+		
+		console.log('🌿 Branch creation debug:');
+		console.log('  - Total messages:', currentThread.messages.length);
+		console.log('  - Branch created at idx:', currentMessageIdx);
+		console.log('  - Branch note:', branchNote);
 		
 		// Create new branch thread with proper typing
 		const newBranch: ThreadType = {
@@ -1907,8 +1922,8 @@ We only need to do it for files that were edited since `from`, ie files between 
 			branchCreatedAtMessageIdx: currentMessageIdx
 		};
 		
-		// Generate contextual summary for the branch
-		const contextSummary = this.generateSimpleContextSummary(currentThread.messages, branchNote);
+		// Generate contextual summary for the branch using AI
+		const contextSummary = await this.generateAIContextSummary(currentThread.messages, branchNote);
 		
 		// Add contextual summary as first message
 		const branchNoteMessage: ChatMessage = {
@@ -1960,19 +1975,159 @@ We only need to do it for files that were edited since `from`, ie files between 
 		const allThreads = this.state.allThreads;
 		const branches: ThreadType[] = [];
 		
+		console.log(`🔍 getBranchesAtMessageIdx(${threadId}, ${messageIdx}):`);
+		
 		// Find all threads that were created at this specific message index
 		for (const thread of Object.values(allThreads)) {
 			if (thread && 
 				thread.parentThreadId === threadId && 
 				thread.branchCreatedAtMessageIdx === messageIdx) {
+				console.log(`  ✅ Found branch: ${thread.branchNote} (created at idx ${thread.branchCreatedAtMessageIdx})`);
 				branches.push(thread);
 			}
 		}
+		
+		console.log(`  📊 Total branches found: ${branches.length}`);
 		
 		// Sort by creation date (newest first)
 		return branches.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 	}
 
+	private async generateAIContextSummary(messages: ChatMessage[], branchFocus: string): Promise<string> {
+		console.log('🌿 Starting AI context summary generation for branch focus:', branchFocus);
+		
+		// Filter messages that have displayContent (user/assistant messages)
+		const messagesWithContent = messages.filter(m => 
+			'displayContent' in m && typeof m.displayContent === 'string'
+		);
+		
+		console.log('📝 Found', messagesWithContent.length, 'messages with content');
+		
+		if (messagesWithContent.length === 0) {
+			console.log('⚠️ No messages with content, using simple summary');
+			return `🌿 **Branch created**\n\n${branchFocus}`;
+		}
+		
+		try {
+			console.log('🤖 Attempting AI context summary generation...');
+			// Get current model selection and settings
+			const featureName: FeatureName = 'Chat';
+			const modelSelection = this._settingsService.state.modelSelectionOfFeature[featureName];
+			const modelSelectionOptions = modelSelection ? this._settingsService.state.optionsOfModelSelection[featureName][modelSelection.providerName]?.[modelSelection.modelName] : undefined;
+			const overridesOfModel = this._settingsService.state.overridesOfModel;
+			const chatMode = this._settingsService.state.globalSettings.chatMode;
+			
+			console.log('🔧 Model selection:', modelSelection);
+			console.log('🔧 Model options:', modelSelectionOptions);
+			console.log('🔧 Chat mode:', chatMode);
+			
+			// Create the context summarization prompt
+			const contextPrompt = this.createContextSummarizationPrompt(branchFocus);
+			
+			// Add the context prompt as a user message to the chat messages
+			const contextPromptMessage: ChatMessage = {
+				role: 'user',
+				content: contextPrompt,
+				displayContent: contextPrompt,
+				selections: null,
+				state: {
+					stagingSelections: [],
+					isBeingEdited: false
+				}
+			};
+			
+			// Combine the conversation history with the context prompt
+			const allMessages = [...messagesWithContent, contextPromptMessage];
+			
+			// Convert chat messages to LLM format (including the context prompt)
+			const { messages: llmMessages, separateSystemMessage } = await this._convertToLLMMessagesService.prepareLLMChatMessages({
+				chatMessages: allMessages,
+				modelSelection,
+				chatMode
+			});
+			
+			// Make the LLM call for context summarization
+			console.log('📞 Making LLM call for context summary...');
+			const summary = await this.callLLMForContextSummary({
+				messages: llmMessages,
+				separateSystemMessage,
+				modelSelection,
+				modelSelectionOptions,
+				overridesOfModel,
+				chatMode
+			});
+			
+			console.log('✅ AI context summary generated successfully');
+			return summary;
+			
+		} catch (error) {
+			console.error('Failed to generate AI context summary:', error);
+			console.error('Error details:', error);
+			// Fallback to simple summary
+			return this.generateSimpleContextSummary(messages, branchFocus);
+		}
+	}
+	
+	private createContextSummarizationPrompt(branchFocus: string): string {
+		return `Please summarise the conversation history with a focus on "${branchFocus}". 
+
+Include technical details which will help solve this problem precisely. The summary should:
+
+1. **Capture the current state** of the project/conversation
+2. **Highlight relevant technical details** that relate to "${branchFocus}"
+3. **Include key decisions, constraints, and context** that will be important for the goal
+4. **Be concise but comprehensive** - provide enough detail to understand the current situation
+5. **Focus on actionable information** that will help make progress on "${branchFocus}"
+
+Format the summary as a clear, structured overview that sets up the context for this focused branch conversation.`;
+	}
+	
+	private async callLLMForContextSummary(params: {
+		messages: LLMChatMessage[];
+		separateSystemMessage: string | undefined;
+		modelSelection: ModelSelection | null;
+		modelSelectionOptions: ModelSelectionOptions | undefined;
+		overridesOfModel: OverridesOfModel | undefined;
+		chatMode: ChatMode | null;
+	}): Promise<string> {
+		console.log('🔄 Starting LLM call for context summary...');
+		return new Promise((resolve, reject) => {
+			const llmCancelToken = this._llmMessageService.sendLLMMessage({
+				messagesType: 'chatMessages',
+				chatMode: params.chatMode,
+				messages: params.messages,
+				modelSelection: params.modelSelection,
+				modelSelectionOptions: params.modelSelectionOptions,
+				overridesOfModel: params.overridesOfModel,
+				separateSystemMessage: params.separateSystemMessage,
+				logging: { 
+					loggingName: 'Branch Context Summary', 
+					loggingExtras: { branchFocus: 'context-summary' } 
+				},
+				onText: ({ fullText }) => {
+					// Stream the text as it comes in
+					console.log('📝 LLM streaming text...');
+				},
+				onFinalMessage: ({ fullText }) => {
+					console.log('✅ LLM call completed successfully');
+					resolve(fullText);
+				},
+				onError: async (error) => {
+					console.error('❌ LLM call failed:', error);
+					reject(new Error(`Context summary generation failed: ${error.message}`));
+				},
+				onAbort: () => {
+					console.error('⏹️ LLM call was aborted');
+					reject(new Error('Context summary generation was aborted'));
+				}
+			});
+			
+			if (!llmCancelToken) {
+				reject(new Error('Failed to start context summary generation'));
+			}
+		});
+	}
+	
 	private generateSimpleContextSummary(messages: ChatMessage[], branchFocus: string): string {
 		// Simple context generation without external service dependency
 		const messagesWithContent = messages.filter(m => 
@@ -1986,11 +2141,11 @@ We only need to do it for files that were edited since `from`, ie files between 
 		// Extract recent context
 		const recentMessages = messagesWithContent.slice(-3);
 		const recentContext = recentMessages
-			.map(m => m.displayContent.substring(0, 100) + (m.displayContent.length > 100 ? '...' : ''))
+			.map(m => (m as any).displayContent.substring(0, 100) + ((m as any).displayContent.length > 100 ? '...' : ''))
 			.join(' | ');
 		
 		// Extract key topics
-		const allText = messagesWithContent.map(m => m.displayContent).join(' ').toLowerCase();
+		const allText = messagesWithContent.map(m => (m as any).displayContent).join(' ').toLowerCase();
 		const commonTopics = [
 			'authentication', 'database', 'api', 'frontend', 'backend', 'testing',
 			'deployment', 'security', 'performance', 'ui/ux', 'architecture',
