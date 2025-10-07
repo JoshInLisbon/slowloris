@@ -2533,27 +2533,110 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 	);
 };
 
-const BackToMainButton = ({ threadId }: { threadId: string }) => {
-	const accessor = useAccessor();
-	const chatThreadsService = accessor.get('IChatThreadService');
+	const BackToMainButton = ({ threadId }: { threadId: string }) => {
+		const accessor = useAccessor();
+		const chatThreadsService = accessor.get('IChatThreadService');
 
-	const handleBackToMain = () => {
-		chatThreadsService.switchToParentThread();
+		const handleBackToMain = () => {
+			chatThreadsService.switchToParentThread();
+		};
+
+		return (
+			<button
+				onClick={handleBackToMain}
+				className="flex items-center gap-1 px-2 py-1 text-xs bg-void-bg-3 hover:bg-void-bg-4 rounded border border-void-stroke-1"
+				data-tooltip-id='void-tooltip'
+				data-tooltip-content='Return to main thread'
+				data-tooltip-place='top'
+			>
+				<ArrowLeft size={10} />
+				Back to Main
+			</button>
+		);
 	};
 
-	return (
-		<button
-			onClick={handleBackToMain}
-			className="flex items-center gap-1 px-2 py-1 text-xs bg-void-bg-3 hover:bg-void-bg-4 rounded border border-void-stroke-1"
-			data-tooltip-id='void-tooltip'
-			data-tooltip-content='Return to main thread'
-			data-tooltip-place='top'
-		>
-			<ArrowLeft size={10} />
-			Back to Main
-		</button>
-	);
-};
+	const BackToMainWithSummaryButton = ({ threadId }: { threadId: string }) => {
+		const [showSummaryModal, setShowSummaryModal] = useState(false);
+		const [summaryNote, setSummaryNote] = useState('Summarize what was accomplished in this branch');
+		const [isCreatingSummary, setIsCreatingSummary] = useState(false);
+		const accessor = useAccessor();
+		const chatThreadsService = accessor.get('IChatThreadService');
+
+		const handleBackToMainWithSummary = async () => {
+			if (summaryNote.trim() && !isCreatingSummary) {
+				setIsCreatingSummary(true);
+				try {
+					await chatThreadsService.switchToParentThreadWithSummary(summaryNote.trim());
+					setSummaryNote('Summarize what was accomplished in this branch');
+					setShowSummaryModal(false);
+				} catch (error) {
+					console.error('Failed to create summary:', error);
+					// Could show a notification here
+				} finally {
+					setIsCreatingSummary(false);
+				}
+			}
+		};
+
+		return (
+			<>
+				<button
+					onClick={() => setShowSummaryModal(true)}
+					className="flex items-center gap-1 px-2 py-1 text-xs bg-void-accent hover:bg-void-accent-hover text-white rounded border border-void-stroke-1"
+					data-tooltip-id='void-tooltip'
+					data-tooltip-content='Return to main thread with AI summary'
+					data-tooltip-place='top'
+				>
+					<ArrowLeft size={10} />
+					Back with Summary
+				</button>
+				
+				{/* Summary modal */}
+				{showSummaryModal && (
+					<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+						<div className="bg-void-bg-2 border border-void-stroke-1 rounded p-4 w-80">
+							<h3 className="text-sm font-medium mb-3">Back to Main with Summary</h3>
+							<div className="space-y-3">
+								<div>
+									<label className="block text-xs font-medium mb-1">What should the summary focus on?</label>
+									<textarea
+										value={summaryNote}
+										onChange={(e) => setSummaryNote(e.target.value)}
+										placeholder="e.g., 'implemented user authentication' or 'fixed database connection issues'"
+										className="w-full p-2 text-xs bg-void-bg-3 border border-void-stroke-1 rounded h-20 resize-none"
+										autoFocus
+									/>
+								</div>
+								
+								<div className="flex gap-2">
+									<button
+										onClick={handleBackToMainWithSummary}
+										disabled={!summaryNote.trim() || isCreatingSummary}
+										className="flex-1 px-3 py-1 text-xs bg-void-accent hover:bg-void-accent-hover text-white rounded disabled:opacity-50 flex items-center justify-center gap-2"
+									>
+										{isCreatingSummary && (
+											<div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
+										)}
+										{isCreatingSummary ? 'Creating...' : 'Back with Summary'}
+									</button>
+									<button
+										onClick={() => {
+											setShowSummaryModal(false);
+											setSummaryNote('Summarize what was accomplished in this branch');
+										}}
+										disabled={isCreatingSummary}
+										className="px-3 py-1 text-xs bg-void-bg-3 hover:bg-void-bg-4 rounded border border-void-stroke-1 disabled:opacity-50"
+									>
+										Cancel
+									</button>
+								</div>
+							</div>
+						</div>
+					</div>
+				)}
+			</>
+		);
+	};
 
 const Checkpoint = ({ message, threadId, messageIdx, isCheckpointGhost, threadIsRunning }: { message: CheckpointEntry, threadId: string; messageIdx: number, isCheckpointGhost: boolean, threadIsRunning: boolean }) => {
 	const accessor = useAccessor()
@@ -2606,9 +2689,12 @@ const Checkpoint = ({ message, threadId, messageIdx, isCheckpointGhost, threadIs
 			<BranchButton threadId={threadId} />
 		)}
 		
-		{/* Back to Main button - always show in branch threads */}
+		{/* Back to Main buttons - always show in branch threads */}
 		{!isMainThread && !isCheckpointGhost && !isDisabled && (
-			<BackToMainButton threadId={threadId} />
+			<>
+				<BackToMainButton threadId={threadId} />
+				<BackToMainWithSummaryButton threadId={threadId} />
+			</>
 		)}
 	</div>
 }

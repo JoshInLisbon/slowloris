@@ -256,6 +256,7 @@ export interface IChatThreadService {
 	// branching (minimal for testing)
 	createBranch(branchNote: string): Promise<void>;
 	switchToParentThread(): void;
+	switchToParentThreadWithSummary(summaryNote: string): Promise<void>;
 	getBranchHistory(threadId: string): ThreadType[];
 	getBranchesAtMessageIdx(threadId: string, messageIdx: number): ThreadType[];
 
@@ -1956,6 +1957,48 @@ We only need to do it for files that were edited since `from`, ie files between 
 		this.switchToThread(currentThread.parentThreadId);
 	}
 
+	async switchToParentThreadWithSummary(summaryNote: string): Promise<void> {
+		const currentThread = this.getCurrentThread();
+		if (!currentThread.parentThreadId) return;
+		
+		console.log('🔄 Switching to parent thread with summary:', summaryNote);
+		
+		// Generate AI summary of the branch conversation
+		const branchSummary = await this.generateBranchSummary(currentThread.messages, summaryNote);
+		
+		// Switch to parent thread
+		this.switchToThread(currentThread.parentThreadId);
+		
+		// Add the branch summary as an assistant message to the parent thread
+		const parentThread = this.getCurrentThread();
+		const summaryMessage: ChatMessage = {
+			role: 'assistant',
+			displayContent: branchSummary,
+			reasoning: `Branch summary from thread ${currentThread.id}`,
+			anthropicReasoning: null
+		};
+		
+		// Add the summary message to the parent thread
+		const updatedMessages = [...parentThread.messages, summaryMessage];
+		const updatedThread = {
+			...parentThread,
+			messages: updatedMessages,
+			lastModified: new Date().toISOString()
+		};
+		
+		// Update the parent thread
+		const updatedThreads = {
+			...this.state.allThreads,
+			[parentThread.id]: updatedThread
+		};
+		
+		this._storeAllThreads(updatedThreads);
+		this._setState({ 
+			allThreads: updatedThreads, 
+			currentThreadId: parentThread.id 
+		});
+	}
+
 	getBranchHistory(threadId: string): ThreadType[] {
 		const allThreads = this.state.allThreads;
 		const branches: ThreadType[] = [];
@@ -2163,6 +2206,162 @@ Format the summary as a clear, structured overview that sets up the context for 
 **Focus Area:** This branch will explore ${branchFocus.toLowerCase()} in detail, building on the current conversation context.
 
 **Next Steps:** Ready to dive deep into ${branchFocus.toLowerCase()} with full context of the current project state.`;
+	}
+
+	private async generateBranchSummary(messages: ChatMessage[], summaryFocus: string): Promise<string> {
+		console.log('🔄 Starting branch summary generation for focus:', summaryFocus);
+		
+		// Filter messages that have displayContent (user/assistant messages)
+		const messagesWithContent = messages.filter(m => 
+			'displayContent' in m && typeof m.displayContent === 'string'
+		);
+		
+		console.log('📝 Found', messagesWithContent.length, 'messages with content');
+		
+		if (messagesWithContent.length === 0) {
+			console.log('⚠️ No messages with content, using simple summary');
+			return `📋 **Branch Summary**\n\n${summaryFocus}`;
+		}
+		
+		try {
+			console.log('🤖 Attempting AI branch summary generation...');
+			// Get current model selection and settings
+			const featureName: FeatureName = 'Chat';
+			const modelSelection = this._settingsService.state.modelSelectionOfFeature[featureName];
+			const modelSelectionOptions = modelSelection ? this._settingsService.state.optionsOfModelSelection[featureName][modelSelection.providerName]?.[modelSelection.modelName] : undefined;
+			const overridesOfModel = this._settingsService.state.overridesOfModel;
+			const chatMode = this._settingsService.state.globalSettings.chatMode;
+			
+			// Create the branch summarization prompt
+			const summaryPrompt = this.createBranchSummarizationPrompt(summaryFocus);
+			
+			// Add the summary prompt as a user message to the chat messages
+			const summaryPromptMessage: ChatMessage = {
+				role: 'user',
+				content: summaryPrompt,
+				displayContent: summaryPrompt,
+				selections: null,
+				state: {
+					stagingSelections: [],
+					isBeingEdited: false
+				}
+			};
+			
+			// Combine the branch conversation history with the summary prompt
+			const allMessages = [...messagesWithContent, summaryPromptMessage];
+			
+			// Convert chat messages to LLM format
+			const { messages: llmMessages, separateSystemMessage } = await this._convertToLLMMessagesService.prepareLLMChatMessages({
+				chatMessages: allMessages,
+				modelSelection,
+				chatMode
+			});
+			
+			// Make the LLM call for branch summarization
+			console.log('📞 Making LLM call for branch summary...');
+			const summary = await this.callLLMForBranchSummary({
+				messages: llmMessages,
+				separateSystemMessage,
+				modelSelection,
+				modelSelectionOptions,
+				overridesOfModel,
+				chatMode
+			});
+			
+			console.log('✅ AI branch summary generated successfully');
+			return summary;
+			
+		} catch (error) {
+			console.error('Failed to generate AI branch summary:', error);
+			console.error('Error details:', error);
+			// Fallback to simple summary
+			return this.generateSimpleBranchSummary(messages, summaryFocus);
+		}
+	}
+
+	private createBranchSummarizationPrompt(summaryFocus: string): string {
+		return `Please summarise this branch conversation with a focus on "${summaryFocus}". 
+
+The summary should:
+
+1. **Capture what was accomplished** in this branch conversation
+2. **Highlight key decisions, solutions, and outcomes** related to "${summaryFocus}"
+3. **Include important technical details** that will be useful for the main conversation
+4. **Be concise but comprehensive** - provide enough detail to understand what happened
+5. **Focus on actionable information** that will help continue the main conversation
+
+Format the summary as a clear, structured report that can be added to the main conversation thread.`;
+	}
+
+	private async callLLMForBranchSummary(params: {
+		messages: LLMChatMessage[];
+		separateSystemMessage: string | undefined;
+		modelSelection: ModelSelection | null;
+		modelSelectionOptions: ModelSelectionOptions | undefined;
+		overridesOfModel: OverridesOfModel | undefined;
+		chatMode: ChatMode | null;
+	}): Promise<string> {
+		console.log('🔄 Starting LLM call for branch summary...');
+		return new Promise((resolve, reject) => {
+			const llmCancelToken = this._llmMessageService.sendLLMMessage({
+				messagesType: 'chatMessages',
+				chatMode: params.chatMode,
+				messages: params.messages,
+				modelSelection: params.modelSelection,
+				modelSelectionOptions: params.modelSelectionOptions,
+				overridesOfModel: params.overridesOfModel,
+				separateSystemMessage: params.separateSystemMessage,
+				logging: { 
+					loggingName: 'Branch Summary', 
+					loggingExtras: { summaryFocus: 'branch-summary' } 
+				},
+				onText: ({ fullText }) => {
+					// Stream the text as it comes in
+					console.log('📝 LLM streaming text...');
+				},
+				onFinalMessage: ({ fullText }) => {
+					console.log('✅ LLM call completed successfully');
+					resolve(fullText);
+				},
+				onError: async (error) => {
+					console.error('❌ LLM call failed:', error);
+					reject(new Error(`Branch summary generation failed: ${error.message}`));
+				},
+				onAbort: () => {
+					console.error('⏹️ LLM call was aborted');
+					reject(new Error('Branch summary generation was aborted'));
+				}
+			});
+			
+			if (!llmCancelToken) {
+				reject(new Error('Failed to start branch summary generation'));
+			}
+		});
+	}
+
+	private generateSimpleBranchSummary(messages: ChatMessage[], summaryFocus: string): string {
+		// Simple fallback summary without AI
+		const messagesWithContent = messages.filter(m => 
+			'displayContent' in m && typeof m.displayContent === 'string'
+		);
+		
+		if (messagesWithContent.length === 0) {
+			return `📋 **Branch Summary**\n\n${summaryFocus}`;
+		}
+		
+		// Extract recent context
+		const recentMessages = messagesWithContent.slice(-3);
+		const recentContext = recentMessages
+			.map(m => (m as any).displayContent.substring(0, 100) + ((m as any).displayContent.length > 100 ? '...' : ''))
+			.join(' | ');
+		
+		return `📋 **Branch Summary**
+
+**Focus:** ${summaryFocus}
+
+**Key Accomplishments:** ${recentContext || 'Work completed in this branch'}
+
+**Status:** Branch work completed and ready to integrate with main conversation.`;
 	}
 
 }
