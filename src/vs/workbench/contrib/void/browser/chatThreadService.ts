@@ -2284,19 +2284,20 @@ Format the summary as a clear, structured overview that sets up the context for 
 
 **Context:** This was a focused branch conversation that explored a specific aspect of the project. A branch is a separate conversation thread that allows deep exploration of a particular topic while keeping the main conversation clean and organized.
 
-**Brevity is extremely important.** While there is no strict limit on length, the summary should be as short as possible while still fulfilling all other responsibilities.
+**Brevity is extremely important.** Use this exact format and length limits:
 
-The summary should:
+**Files Changed:** [List all files that were modified, created, or discussed - one line per file]
 
-1. **Capture what was accomplished** in this branch conversation
-2. **Highlight key decisions, solutions, and outcomes** related to "${summaryFocus}"
-3. **Include important technical details** that will be useful for the main conversation
-4. **List all files that were modified, created, or discussed** - these should be re-read when continuing work on the main branch
-5. **Focus on actionable information** that will help continue the main conversation
+**What was done:** [1-2 sentences describing the key actions taken]
 
-**Important:** Include a comprehensive list of any files that were changed, created, or significantly discussed in this branch. This helps ensure the main conversation has full context of all modifications.
+**Key outcome:** [1 sentence describing the main result or impact]
 
-Format the summary as a clear, structured report that can be added to the main conversation thread.`;
+**Further details:**
+- Simple changes (don't add anything here)
+- Medium changes (multiple files, moderate complexity): 1 paragraph max  
+- Complex changes (architectural, many files): 3 paragraphs max
+
+Focus on essential information only. Avoid explaining how tools work or providing unnecessary technical details.`;
 	}
 
 	private async callLLMForBranchSummary(params: {
