@@ -2284,14 +2284,15 @@ Format the summary as a clear, structured overview that sets up the context for 
 
 **Context:** This was a focused branch conversation that explored a specific aspect of the project. A branch is a separate conversation thread that allows deep exploration of a particular topic while keeping the main conversation clean and organized.
 
+**Brevity is extremely important.** While there is no strict limit on length, the summary should be as short as possible while still fulfilling all other responsibilities.
+
 The summary should:
 
 1. **Capture what was accomplished** in this branch conversation
 2. **Highlight key decisions, solutions, and outcomes** related to "${summaryFocus}"
 3. **Include important technical details** that will be useful for the main conversation
 4. **List all files that were modified, created, or discussed** - these should be re-read when continuing work on the main branch
-5. **Be concise but comprehensive** - provide enough detail to understand what happened
-6. **Focus on actionable information** that will help continue the main conversation
+5. **Focus on actionable information** that will help continue the main conversation
 
 **Important:** Include a comprehensive list of any files that were changed, created, or significantly discussed in this branch. This helps ensure the main conversation has full context of all modifications.
 
