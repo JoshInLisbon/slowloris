@@ -25,7 +25,8 @@ import { ICommandService } from '../../../../../../../platform/commands/common/c
 import { WarningBox } from '../void-settings-tsx/WarningBox.js';
 import { getModelCapabilities, getIsReasoningEnabledState } from '../../../../common/modelCapabilities.js';
 import { AlertTriangle, File, Ban, Check, ChevronRight, Dot, FileIcon, Pencil, Undo, Undo2, X, Flag, Copy as CopyIcon, Info, CirclePlus, Ellipsis, CircleEllipsis, Folder, ALargeSmall, TypeOutline, Text, GitBranch, ArrowLeft } from 'lucide-react';
-import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage, ThreadType } from '../../../../common/chatThreadServiceTypes.js';
+import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage } from '../../../../common/chatThreadServiceTypes.js';
+import { ThreadType } from '../../../../browser/chatThreadService.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, ToolName, LintErrorItem, ToolApprovalType, toolApprovalTypes } from '../../../../common/toolsServiceTypes.js';
 import { CopyButton, EditToolAcceptRejectButtonsHTML, IconShell1, JumpToFileButton, JumpToTerminalButton, StatusIndicator, StatusIndicatorForApplyButton, useApplyStreamState, useEditToolStreamState } from '../markdown/ApplyBlockHoverButtons.js';
 import { IsRunningType } from '../../../chatThreadService.js';
@@ -2485,7 +2486,7 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 				<GitBranch size={10} />
 				Branch
 			</button>
-			
+
 			{/* Simple branch modal */}
 			{showBranchModal && (
 				<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -2502,7 +2503,7 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 									autoFocus
 								/>
 							</div>
-							
+
 							<div className="flex gap-2">
 								<button
 									onClick={handleCreateBranch}
@@ -2683,12 +2684,11 @@ const Checkpoint = ({ message, threadId, messageIdx, isCheckpointGhost, threadIs
 		>
 			Checkpoint
 		</div>
-		
+
 		{/* Branch button - only show on latest checkpoint of main thread */}
 		{isMainThread && isLatestCheckpoint && !isCheckpointGhost && !isDisabled && (
 			<BranchButton threadId={threadId} />
 		)}
-		
 		{/* Back to Main buttons - always show in branch threads */}
 		{!isMainThread && !isCheckpointGhost && !isDisabled && (
 			<>
@@ -3105,10 +3105,10 @@ export const SidebarChat = () => {
 
 	const selections = currentThread.state.stagingSelections
 	const setSelections = (s: StagingSelectionItem[]) => { chatThreadsService.setCurrentThreadState({ stagingSelections: s }) }
-	
+
 	// Tab state
 	const [activeTab, setActiveTab] = useState<'chat' | 'branches'>('chat');
-	
+
 	// Auto-switch to chat tab when navigating to a branch thread
 	useEffect(() => {
 		// If we're in a branch thread, always show the chat tab
@@ -3187,15 +3187,15 @@ export const SidebarChat = () => {
 	const previousMessagesHTML = useMemo(() => {
 		// Get all branches for this thread to understand their historical positions
 		const allBranches = chatThreadsService.getBranchHistory(threadId);
-		
+
 		console.log('🔍 DEBUG: Branch rendering analysis:');
 		console.log('  - Current message count:', previousMessages.length);
-		console.log('  - All branches:', allBranches.map(b => ({ 
-			note: b.branchNote, 
+		console.log('  - All branches:', allBranches.map(b => ({
+			note: b.branchNote,
 			createdAtIdx: b.branchCreatedAtMessageIdx,
-			createdAt: b.createdAt 
+			createdAt: b.createdAt
 		})));
-		
+
 		// Create a map of message index to branches for efficient lookup
 		const branchesByMessageIdx: { [key: number]: ThreadType[] } = {};
 		allBranches.forEach(branch => {
@@ -3207,15 +3207,15 @@ export const SidebarChat = () => {
 				branchesByMessageIdx[targetMessageIdx].push(branch);
 			}
 		});
-		
+
 		console.log('  - Branches by message idx:', Object.keys(branchesByMessageIdx).map(idx => ({
 			messageIdx: idx,
 			branches: branchesByMessageIdx[parseInt(idx)].map(b => b.branchNote)
 		})));
-		
+
 		// Create a combined list of messages and branches in chronological order
 		const allElements: React.ReactNode[] = [];
-		
+
 		// Add all messages and their associated branches
 		previousMessages.forEach((message, i) => {
 			const messageElement = <ChatBubble
@@ -3228,9 +3228,9 @@ export const SidebarChat = () => {
 				threadId={threadId}
 				_scrollToBottom={() => scrollToBottom(scrollContainerRef)}
 			/>;
-			
+
 			allElements.push(messageElement);
-			
+
 			// Check if there are any branches that should appear after this message
 			const branchesAfterThisMessage = branchesByMessageIdx[i] || [];
 			if (branchesAfterThisMessage.length > 0) {
@@ -3240,22 +3240,22 @@ export const SidebarChat = () => {
 				});
 			}
 		});
-		
+
 		// Handle branches that were created at the "end" of the conversation at the time of creation
 		// These branches should appear at their historical position, not at the current end
 		const currentMessageCount = previousMessages.length;
-		
+
 		// Find branches that were created when the conversation had fewer messages than it does now
 		// These should be inserted at their historical position
 		allBranches.forEach(branch => {
-			if (branch.branchCreatedAtMessageIdx !== undefined && 
+			if (branch.branchCreatedAtMessageIdx !== undefined &&
 				branch.branchCreatedAtMessageIdx < currentMessageCount &&
 				!branchesByMessageIdx[branch.branchCreatedAtMessageIdx]) {
 				// This branch was created at a message index that's less than current count
 				// but it's not already being rendered after a message
 				// This means it should be inserted at its historical position
 				console.log(`📍 Inserting branch "${branch.branchNote}" at historical position ${branch.branchCreatedAtMessageIdx}`);
-				
+
 				// Insert the branch at the correct position in the allElements array
 				const insertIndex = branch.branchCreatedAtMessageIdx + 1; // After the message at that index
 				if (insertIndex <= allElements.length) {
@@ -3263,7 +3263,7 @@ export const SidebarChat = () => {
 				}
 			}
 		});
-		
+
 		// Finally, add any branches that were created at the current end of the conversation
 		const branchesAtCurrentEnd = branchesByMessageIdx[currentMessageCount] || [];
 		if (branchesAtCurrentEnd.length > 0) {
@@ -3272,9 +3272,9 @@ export const SidebarChat = () => {
 				allElements.push(<BranchMarker key={`branch-${branch.id}-${branchIdx}`} branch={branch} />);
 			});
 		}
-		
+
 		console.log('  - Final element count:', allElements.length);
-		
+
 		return allElements;
 	}, [previousMessages, threadId, currCheckpointIdx, isRunning, chatThreadsService, chatThreadsState])
 
@@ -3345,7 +3345,7 @@ export const SidebarChat = () => {
 				<WarningBox className='text-sm my-2 mx-4' onClick={() => { commandService.executeCommand(VOID_OPEN_SETTINGS_ACTION_ID) }} text='Open settings' />
 			</div>
 		}
-		
+
 	</ScrollToBottomContainer>
 
 
@@ -3412,20 +3412,21 @@ export const SidebarChat = () => {
 		<div className='px-4'>
 			<CommandBarInChat />
 		</div>
-		<div className='px-2 pb-2'>
+		<div className='px-2 pb-4 mb-2'>
 			{inputChatArea}
 		</div>
 	</div>
 
 	const landingPageInput = <div>
-		<div className='pt-8'>
+		<div className='pt-8 pb-4 mb-2'>
 			{inputChatArea}
 		</div>
 	</div>
 
 	const landingPageContent = <div
 		ref={sidebarRef}
-		className='w-full h-full max-h-full flex flex-col overflow-auto px-4'
+		className='w-full max-h-full flex flex-col overflow-auto px-4'
+		style={{ height: 'calc(100% - 40px)' }}
 	>
 		<ErrorBoundary>
 			{landingPageInput}
@@ -3460,7 +3461,8 @@ export const SidebarChat = () => {
 	// </div>
 	const threadPageContent = <div
 		ref={sidebarRef}
-		className='w-full h-full flex flex-col overflow-hidden'
+		className='w-full flex flex-col overflow-hidden'
+		style={{ height: 'calc(100% - 40px)' }}
 	>
 		<ErrorBoundary>
 			{messagesHTML}
@@ -3490,8 +3492,8 @@ export const SidebarChat = () => {
 			<button
 				onClick={() => setActiveTab('chat')}
 				className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-					activeTab === 'chat' 
-						? 'border-void-accent text-void-fg-1' 
+					activeTab === 'chat'
+						? 'border-void-accent text-void-fg-1'
 						: 'border-transparent text-void-fg-3 hover:text-void-fg-2'
 				}`}
 			>
@@ -3501,8 +3503,8 @@ export const SidebarChat = () => {
 				<button
 					onClick={() => setActiveTab('branches')}
 					className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-						activeTab === 'branches' 
-							? 'border-void-accent text-void-fg-1' 
+						activeTab === 'branches'
+							? 'border-void-accent text-void-fg-1'
 							: 'border-transparent text-void-fg-3 hover:text-void-fg-2'
 					}`}
 				>
@@ -3516,7 +3518,7 @@ export const SidebarChat = () => {
 	const tabContent = activeTab === 'chat' ? (
 		isLandingPage ? landingPageContent : threadPageContent
 	) : (
-		<div className="flex flex-col h-full">
+		<div className="flex flex-col" style={{ height: 'calc(100% - 40px)' }}>
 			<div className="flex-1 overflow-y-auto p-4">
 				<BranchHistory threadId={currentThread.id} />
 			</div>
