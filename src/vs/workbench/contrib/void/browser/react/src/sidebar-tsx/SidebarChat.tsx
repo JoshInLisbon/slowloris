@@ -1334,6 +1334,10 @@ const AssistantMessageComponent = ({ chatMessage, isCheckpointGhost, isCommitted
 	const isDoneReasoning = !!chatMessage.displayContent
 	const thread = chatThreadsService.getCurrentThread()
 
+	// Special case: if we have reasoning but no display content yet, treat as streaming
+	// This handles branch operations where reasoning streams in before display content
+	const isReasoningOnly = hasReasoning && !chatMessage.displayContent
+	const effectiveIsStreaming = !isCommitted || isReasoningOnly
 
 	const chatMessageLocation: ChatMessageLocation = {
 		threadId: thread.id,
@@ -1347,7 +1351,7 @@ const AssistantMessageComponent = ({ chatMessage, isCheckpointGhost, isCommitted
 		{/* reasoning token */}
 		{hasReasoning &&
 			<div className={`${isCheckpointGhost ? 'opacity-50' : ''}`}>
-				<ReasoningWrapper isDoneReasoning={isDoneReasoning} isStreaming={!isCommitted}>
+				<ReasoningWrapper isDoneReasoning={isDoneReasoning} isStreaming={effectiveIsStreaming}>
 					<SmallProseWrapper>
 						<ChatMarkdownRender
 							string={reasoningStr}
@@ -2450,90 +2454,6 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 	},
 };
 
-
-	const BranchButton = ({ threadId }: { threadId: string }) => {
-		const [showBranchModal, setShowBranchModal] = useState(false);
-		const [branchNote, setBranchNote] = useState('');
-		const [isCreatingBranch, setIsCreatingBranch] = useState(false);
-		const accessor = useAccessor();
-		const chatThreadsService = accessor.get('IChatThreadService');
-
-		const handleCreateBranch = async () => {
-			if (branchNote.trim() && !isCreatingBranch) {
-				setIsCreatingBranch(true);
-				try {
-					await chatThreadsService.createBranch(branchNote.trim());
-					setBranchNote('');
-					setShowBranchModal(false);
-				} catch (error) {
-					console.error('Failed to create branch:', error);
-					// Could show a notification here
-				} finally {
-					setIsCreatingBranch(false);
-				}
-			}
-		};
-
-	return (
-		<>
-			<button
-				onClick={() => setShowBranchModal(true)}
-				className="flex items-center gap-1 px-2 py-1 text-xs bg-void-bg-3 hover:bg-void-bg-4 rounded border border-void-stroke-1"
-				data-tooltip-id='void-tooltip'
-				data-tooltip-content='Create a focused branch conversation'
-				data-tooltip-place='top'
-			>
-				<GitBranch size={10} />
-				Branch
-			</button>
-
-			{/* Simple branch modal */}
-			{showBranchModal && (
-				<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-					<div className="bg-void-bg-2 border border-void-stroke-1 rounded p-4 w-80">
-						<h3 className="text-sm font-medium mb-3">Create Branch</h3>
-						<div className="space-y-3">
-							<div>
-								<label className="block text-xs font-medium mb-1">What are you branching out to explore?</label>
-								<textarea
-									value={branchNote}
-									onChange={(e) => setBranchNote(e.target.value)}
-									placeholder="e.g., 'research authentication patterns' or 'implement user login'"
-									className="w-full p-2 text-xs bg-void-bg-3 border border-void-stroke-1 rounded h-20 resize-none"
-									autoFocus
-								/>
-							</div>
-
-							<div className="flex gap-2">
-								<button
-									onClick={handleCreateBranch}
-									disabled={!branchNote.trim() || isCreatingBranch}
-									className="flex-1 px-3 py-1 text-xs bg-void-accent hover:bg-void-accent-hover text-white rounded disabled:opacity-50 flex items-center justify-center gap-2"
-								>
-									{isCreatingBranch && (
-										<div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
-									)}
-									{isCreatingBranch ? 'Creating...' : 'Create Branch'}
-								</button>
-								<button
-									onClick={() => {
-										setShowBranchModal(false);
-										setBranchNote('');
-									}}
-									disabled={isCreatingBranch}
-									className="px-3 py-1 text-xs bg-void-bg-3 hover:bg-void-bg-4 rounded border border-void-stroke-1 disabled:opacity-50"
-								>
-									Cancel
-								</button>
-							</div>
-						</div>
-					</div>
-				</div>
-			)}
-		</>
-	);
-};
-
 	const BackToMainButton = ({ threadId }: { threadId: string }) => {
 		const accessor = useAccessor();
 		const chatThreadsService = accessor.get('IChatThreadService');
@@ -2556,90 +2476,7 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 		);
 	};
 
-	const BackToMainWithSummaryButton = ({ threadId }: { threadId: string }) => {
-		const [showSummaryModal, setShowSummaryModal] = useState(false);
-		const [summaryNote, setSummaryNote] = useState('Summarize what was accomplished in this branch');
-		const [isCreatingSummary, setIsCreatingSummary] = useState(false);
-		const accessor = useAccessor();
-		const chatThreadsService = accessor.get('IChatThreadService');
-
-		const handleBackToMainWithSummary = async () => {
-			if (summaryNote.trim() && !isCreatingSummary) {
-				setIsCreatingSummary(true);
-				try {
-					await chatThreadsService.switchToParentThreadWithSummary(summaryNote.trim());
-					setSummaryNote('Summarize what was accomplished in this branch');
-					setShowSummaryModal(false);
-				} catch (error) {
-					console.error('Failed to create summary:', error);
-					// Could show a notification here
-				} finally {
-					setIsCreatingSummary(false);
-				}
-			}
-		};
-
-		return (
-			<>
-				<button
-					onClick={() => setShowSummaryModal(true)}
-					className="flex items-center gap-1 px-2 py-1 text-xs bg-void-accent hover:bg-void-accent-hover text-white rounded border border-void-stroke-1"
-					data-tooltip-id='void-tooltip'
-					data-tooltip-content='Return to main thread with AI summary'
-					data-tooltip-place='top'
-				>
-					<ArrowLeft size={10} />
-					Back with Summary
-				</button>
-				
-				{/* Summary modal */}
-				{showSummaryModal && (
-					<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-						<div className="bg-void-bg-2 border border-void-stroke-1 rounded p-4 w-80">
-							<h3 className="text-sm font-medium mb-3">Back to Main with Summary</h3>
-							<div className="space-y-3">
-								<div>
-									<label className="block text-xs font-medium mb-1">What should the summary focus on?</label>
-									<textarea
-										value={summaryNote}
-										onChange={(e) => setSummaryNote(e.target.value)}
-										placeholder="e.g., 'implemented user authentication' or 'fixed database connection issues'"
-										className="w-full p-2 text-xs bg-void-bg-3 border border-void-stroke-1 rounded h-20 resize-none"
-										autoFocus
-									/>
-								</div>
-								
-								<div className="flex gap-2">
-									<button
-										onClick={handleBackToMainWithSummary}
-										disabled={!summaryNote.trim() || isCreatingSummary}
-										className="flex-1 px-3 py-1 text-xs bg-void-accent hover:bg-void-accent-hover text-white rounded disabled:opacity-50 flex items-center justify-center gap-2"
-									>
-										{isCreatingSummary && (
-											<div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
-										)}
-										{isCreatingSummary ? 'Creating...' : 'Back with Summary'}
-									</button>
-									<button
-										onClick={() => {
-											setShowSummaryModal(false);
-											setSummaryNote('Summarize what was accomplished in this branch');
-										}}
-										disabled={isCreatingSummary}
-										className="px-3 py-1 text-xs bg-void-bg-3 hover:bg-void-bg-4 rounded border border-void-stroke-1 disabled:opacity-50"
-									>
-										Cancel
-									</button>
-								</div>
-							</div>
-						</div>
-					</div>
-				)}
-			</>
-		);
-	};
-
-const Checkpoint = ({ message, threadId, messageIdx, isCheckpointGhost, threadIsRunning }: { message: CheckpointEntry, threadId: string; messageIdx: number, isCheckpointGhost: boolean, threadIsRunning: boolean }) => {
+const Checkpoint = ({ message, threadId, messageIdx, isCheckpointGhost, threadIsRunning, setShowBranchLoading, setShowSummaryLoading }: { message: CheckpointEntry, threadId: string; messageIdx: number, isCheckpointGhost: boolean, threadIsRunning: boolean, setShowBranchLoading: (show: boolean) => void, setShowSummaryLoading: (show: boolean) => void }) => {
 	const accessor = useAccessor()
 	const chatThreadService = accessor.get('IChatThreadService')
 	const streamState = useFullChatThreadsStreamState()
@@ -2687,13 +2524,13 @@ const Checkpoint = ({ message, threadId, messageIdx, isCheckpointGhost, threadIs
 
 		{/* Branch button - only show on latest checkpoint of main thread */}
 		{isMainThread && isLatestCheckpoint && !isCheckpointGhost && !isDisabled && (
-			<BranchButton threadId={threadId} />
+			<BranchButtonWrapper threadId={threadId} setShowBranchLoading={setShowBranchLoading} />
 		)}
 		{/* Back to Main buttons - always show in branch threads */}
 		{!isMainThread && !isCheckpointGhost && !isDisabled && (
 			<>
 				<BackToMainButton threadId={threadId} />
-				<BackToMainWithSummaryButton threadId={threadId} />
+				<BackToMainWithSummaryButtonWrapper threadId={threadId} setShowSummaryLoading={setShowSummaryLoading} />
 			</>
 		)}
 	</div>
@@ -2709,6 +2546,8 @@ type ChatBubbleProps = {
 	threadId: string,
 	currCheckpointIdx: number | undefined,
 	_scrollToBottom: (() => void) | null,
+	setShowBranchLoading: (show: boolean) => void,
+	setShowSummaryLoading: (show: boolean) => void
 }
 
 const ChatBubble = (props: ChatBubbleProps) => {
@@ -2717,7 +2556,7 @@ const ChatBubble = (props: ChatBubbleProps) => {
 	</ErrorBoundary>
 }
 
-const _ChatBubble = ({ threadId, chatMessage, currCheckpointIdx, isCommitted, messageIdx, chatIsRunning, _scrollToBottom }: ChatBubbleProps) => {
+const _ChatBubble = ({ threadId, chatMessage, currCheckpointIdx, isCommitted, messageIdx, chatIsRunning, _scrollToBottom, setShowBranchLoading, setShowSummaryLoading }: ChatBubbleProps) => {
 	const role = chatMessage.role
 
 	const isCheckpointGhost = messageIdx > (currCheckpointIdx ?? Infinity) && !chatIsRunning // whether to show as gray (if chat is running, for good measure just dont show any ghosts)
@@ -2782,6 +2621,8 @@ const _ChatBubble = ({ threadId, chatMessage, currCheckpointIdx, isCommitted, me
 			messageIdx={messageIdx}
 			isCheckpointGhost={isCheckpointGhost}
 			threadIsRunning={!!chatIsRunning}
+			setShowBranchLoading={setShowBranchLoading}
+			setShowSummaryLoading={setShowSummaryLoading}
 		/>
 	}
 
@@ -3109,6 +2950,11 @@ export const SidebarChat = () => {
 	// Tab state
 	const [activeTab, setActiveTab] = useState<'chat' | 'branches'>('chat');
 
+	// Loading states for branch operations
+	const [showBranchLoading, setShowBranchLoading] = useState(false);
+	const [showSummaryLoading, setShowSummaryLoading] = useState(false);
+
+
 	// Auto-switch to chat tab when navigating to a branch thread
 	useEffect(() => {
 		// If we're in a branch thread, always show the chat tab
@@ -3227,6 +3073,8 @@ export const SidebarChat = () => {
 				chatIsRunning={isRunning}
 				threadId={threadId}
 				_scrollToBottom={() => scrollToBottom(scrollContainerRef)}
+				setShowBranchLoading={setShowBranchLoading}
+				setShowSummaryLoading={setShowSummaryLoading}
 			/>;
 
 			allElements.push(messageElement);
@@ -3292,9 +3140,10 @@ export const SidebarChat = () => {
 			messageIdx={streamingChatIdx}
 			isCommitted={false}
 			chatIsRunning={isRunning}
-
 			threadId={threadId}
 			_scrollToBottom={null}
+			setShowBranchLoading={setShowBranchLoading}
+			setShowSummaryLoading={setShowSummaryLoading}
 		/> : null
 
 
@@ -3330,6 +3179,26 @@ export const SidebarChat = () => {
 		{isRunning === 'LLM' || isRunning === 'idle' && !toolIsGenerating ? <ProseWrapper>
 			{<IconLoading className='opacity-50 text-sm' />}
 		</ProseWrapper> : null}
+
+		{/* branch operation loading indicator */}
+		{showBranchLoading && (
+			<div className="flex items-center justify-center py-2">
+				<div className="flex items-center gap-3 p-3 bg-void-bg-2 rounded-lg border border-void-stroke-1 max-w-md">
+					<div className="w-4 h-4 border-2 border-void-accent border-t-transparent rounded-full animate-spin"></div>
+					<div className="text-sm text-void-fg-2">Creating branch...</div>
+				</div>
+			</div>
+		)}
+
+		{/* summary operation loading indicator */}
+		{showSummaryLoading && (
+			<div className="flex items-center justify-center py-2">
+				<div className="flex items-center gap-3 p-3 bg-void-bg-2 rounded-lg border border-void-stroke-1 max-w-md">
+					<div className="w-4 h-4 border-2 border-void-accent border-t-transparent rounded-full animate-spin"></div>
+					<div className="text-sm text-void-fg-2">Generating summary...</div>
+				</div>
+			</div>
+		)}
 
 
 		{/* error message */}
@@ -3529,7 +3398,178 @@ export const SidebarChat = () => {
 		<Fragment key={currentThread.id} // force rerender when change thread
 		>
 			{tabHeader}
-			{tabContent}
-		</Fragment>
-	)
+		{tabContent}
+	</Fragment>
+)
 }
+
+// Wrapper components to pass state setters
+const BranchButtonWrapper = ({ threadId, setShowBranchLoading }: { threadId: string, setShowBranchLoading: (show: boolean) => void }) => {
+	const [showBranchModal, setShowBranchModal] = useState(false);
+	const [branchNote, setBranchNote] = useState('');
+	const [isCreatingBranch, setIsCreatingBranch] = useState(false);
+	const accessor = useAccessor();
+	const chatThreadsService = accessor.get('IChatThreadService');
+
+	const handleCreateBranch = async () => {
+		if (branchNote.trim() && !isCreatingBranch) {
+			setIsCreatingBranch(true);
+			setShowBranchLoading(true);
+			try {
+				await chatThreadsService.createBranch(branchNote.trim());
+				setBranchNote('');
+				setShowBranchModal(false);
+			} catch (error) {
+				console.error('Failed to create branch:', error);
+				// Could show a notification here
+			} finally {
+				setIsCreatingBranch(false);
+				setShowBranchLoading(false);
+			}
+		}
+	};
+
+	return (
+		<>
+			<button
+				onClick={() => setShowBranchModal(true)}
+				className="flex items-center gap-1 px-2 py-1 text-xs bg-void-bg-3 hover:bg-void-bg-4 rounded border border-void-stroke-1"
+				data-tooltip-id='void-tooltip'
+				data-tooltip-content='Create a focused branch conversation'
+				data-tooltip-place='top'
+			>
+				<GitBranch size={10} />
+				Branch
+			</button>
+
+			{/* Simple branch modal */}
+			{showBranchModal && (
+				<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+					<div className="bg-void-bg-2 border border-void-stroke-1 rounded p-4 w-80">
+						<h3 className="text-sm font-medium mb-3">Create Branch</h3>
+						<div className="space-y-3">
+							<div>
+								<label className="block text-xs font-medium mb-1">What are you branching out to explore?</label>
+								<textarea
+									value={branchNote}
+									onChange={(e) => setBranchNote(e.target.value)}
+									placeholder="e.g., 'research authentication patterns' or 'implement user login'"
+									className="w-full p-2 text-xs bg-void-bg-3 border border-void-stroke-1 rounded h-20 resize-none"
+									autoFocus
+								/>
+							</div>
+
+							<div className="flex gap-2">
+								<button
+									onClick={handleCreateBranch}
+									disabled={!branchNote.trim() || isCreatingBranch}
+									className="flex-1 px-3 py-1 text-xs bg-void-accent hover:bg-void-accent-hover text-white rounded disabled:opacity-50 flex items-center justify-center gap-2"
+								>
+									{isCreatingBranch && (
+										<div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
+									)}
+									{isCreatingBranch ? 'Creating...' : 'Create Branch'}
+								</button>
+								<button
+									onClick={() => {
+										setShowBranchModal(false);
+										setBranchNote('');
+									}}
+									disabled={isCreatingBranch}
+									className="px-3 py-1 text-xs bg-void-bg-3 hover:bg-void-bg-4 rounded border border-void-stroke-1 disabled:opacity-50"
+								>
+									Cancel
+								</button>
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
+		</>
+	);
+};
+
+const BackToMainWithSummaryButtonWrapper = ({ threadId, setShowSummaryLoading }: { threadId: string, setShowSummaryLoading: (show: boolean) => void }) => {
+	const [showSummaryModal, setShowSummaryModal] = useState(false);
+	const [summaryNote, setSummaryNote] = useState('Summarize what was accomplished in this branch');
+	const [isCreatingSummary, setIsCreatingSummary] = useState(false);
+	const accessor = useAccessor();
+	const chatThreadsService = accessor.get('IChatThreadService');
+
+	const handleBackToMainWithSummary = async () => {
+		if (summaryNote.trim() && !isCreatingSummary) {
+			setIsCreatingSummary(true);
+			setShowSummaryLoading(true);
+			try {
+				await chatThreadsService.switchToParentThreadWithSummary(summaryNote.trim());
+				setSummaryNote('Summarize what was accomplished in this branch');
+				setShowSummaryModal(false);
+			} catch (error) {
+				console.error('Failed to create summary:', error);
+				// Could show a notification here
+			} finally {
+				setIsCreatingSummary(false);
+				setShowSummaryLoading(false);
+			}
+		}
+	};
+
+	return (
+		<>
+			<button
+				onClick={() => setShowSummaryModal(true)}
+				className="flex items-center gap-1 px-2 py-1 text-xs bg-void-accent hover:bg-void-accent-hover text-white rounded border border-void-stroke-1"
+				data-tooltip-id='void-tooltip'
+				data-tooltip-content='Return to main thread with AI summary'
+				data-tooltip-place='top'
+			>
+				<ArrowLeft size={10} />
+				Back with Summary
+			</button>
+
+			{/* Summary modal */}
+			{showSummaryModal && (
+				<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+					<div className="bg-void-bg-2 border border-void-stroke-1 rounded p-4 w-80">
+						<h3 className="text-sm font-medium mb-3">Back to Main with Summary</h3>
+						<div className="space-y-3">
+							<div>
+								<label className="block text-xs font-medium mb-1">What should the summary focus on?</label>
+								<textarea
+									value={summaryNote}
+									onChange={(e) => setSummaryNote(e.target.value)}
+									placeholder="e.g., 'implemented user authentication' or 'fixed database connection issues'"
+									className="w-full p-2 text-xs bg-void-bg-3 border border-void-stroke-1 rounded h-20 resize-none"
+									autoFocus
+								/>
+							</div>
+
+							<div className="flex gap-2">
+								<button
+									onClick={handleBackToMainWithSummary}
+									disabled={!summaryNote.trim() || isCreatingSummary}
+									className="flex-1 px-3 py-1 text-xs bg-void-accent hover:bg-void-accent-hover text-white rounded disabled:opacity-50 flex items-center justify-center gap-2"
+								>
+									{isCreatingSummary && (
+										<div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
+									)}
+									{isCreatingSummary ? 'Creating...' : 'Back with Summary'}
+								</button>
+								<button
+									onClick={() => {
+										setShowSummaryModal(false);
+										setSummaryNote('Summarize what was accomplished in this branch');
+									}}
+									disabled={isCreatingSummary}
+									className="px-3 py-1 text-xs bg-void-bg-3 hover:bg-void-bg-4 rounded border border-void-stroke-1 disabled:opacity-50"
+								>
+									Cancel
+								</button>
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
+		</>
+	);
+};

@@ -1935,64 +1935,34 @@ We only need to do it for files that were edited since `from`, ie files between 
 			currentThreadId: newBranch.id
 		});
 
-		// After a short delay, start generating the contextual summary so user can see it streaming
-		setTimeout(async () => {
-			try {
-				// Create a placeholder message that will be updated as the AI streams
-				const placeholderMessage: ChatMessage = {
-					role: 'assistant',
-					displayContent: '',
-					reasoning: `Generating context summary for branch: ${branchNote}`,
-					anthropicReasoning: null
-				};
+		// Start generating the contextual summary with streaming immediately
+		// The promise will resolve when the first streaming response arrives
+		return this.generateAIContextSummaryStreaming(currentThread.messages, branchNote, newBranch.id).catch(error => {
+			console.error('Failed to generate context summary:', error);
+			// Add a simple fallback message
+			const fallbackMessage: ChatMessage = {
+				role: 'assistant',
+				displayContent: `🌿 **Branch created**\n\n${branchNote}`,
+				reasoning: `Branch created from parent thread ${currentThread.id}`,
+				anthropicReasoning: null
+			};
 
-				// Add the placeholder message to the branch
-				const updatedBranch = {
-					...newBranch,
-					messages: [placeholderMessage]
-				};
+			const updatedBranch = {
+				...newBranch,
+				messages: [fallbackMessage]
+			};
 
-				const updatedThreads = {
-					...this.state.allThreads,
-					[newBranch.id]: updatedBranch
-				};
+			const updatedThreads = {
+				...this.state.allThreads,
+				[newBranch.id]: updatedBranch
+			};
 
-				this._storeAllThreads(updatedThreads);
-				this._setState({
-					allThreads: updatedThreads,
-					currentThreadId: newBranch.id
-				});
-
-				// Now generate the contextual summary with streaming
-				await this.generateAIContextSummaryStreaming(currentThread.messages, branchNote, newBranch.id);
-
-			} catch (error) {
-				console.error('Failed to generate context summary:', error);
-				// Add a simple fallback message
-				const fallbackMessage: ChatMessage = {
-					role: 'assistant',
-					displayContent: `🌿 **Branch created**\n\n${branchNote}`,
-					reasoning: `Branch created from parent thread ${currentThread.id}`,
-					anthropicReasoning: null
-				};
-
-				const updatedBranch = {
-					...newBranch,
-					messages: [fallbackMessage]
-				};
-
-				const updatedThreads = {
-					...this.state.allThreads,
-					[newBranch.id]: updatedBranch
-				};
-
-				this._storeAllThreads(updatedThreads);
-				this._setState({
-					allThreads: updatedThreads,
-					currentThreadId: newBranch.id
-				});
-			}
-		}, 500); // 500ms delay as requested
+			this._storeAllThreads(updatedThreads);
+			this._setState({
+				allThreads: updatedThreads,
+				currentThreadId: newBranch.id
+			});
+		});
 	}
 
 	switchToParentThread(): void {
@@ -2009,23 +1979,20 @@ We only need to do it for files that were edited since `from`, ie files between 
 
 		console.log('🔄 Switching to parent thread with summary:', summaryNote);
 
-		// Generate AI summary of the branch conversation
-		const branchSummary = await this.generateBranchSummary(currentThread.messages, summaryNote);
-
-		// Switch to parent thread
+		// Switch to parent thread immediately
 		this.switchToThread(currentThread.parentThreadId);
 
-		// Add the branch summary as an assistant message to the parent thread
+		// Add a placeholder message that will be updated with streaming
 		const parentThread = this.getCurrentThread();
-		const summaryMessage: ChatMessage = {
+		const placeholderMessage: ChatMessage = {
 			role: 'assistant',
-			displayContent: branchSummary,
+			displayContent: '📋 Generating branch summary...',
 			reasoning: `Branch summary from thread ${currentThread.id}`,
 			anthropicReasoning: null
 		};
 
-		// Add the summary message to the parent thread
-		const updatedMessages = [...parentThread.messages, summaryMessage];
+		// Add the placeholder message to the parent thread
+		const updatedMessages = [...parentThread.messages, placeholderMessage];
 		const updatedThread = {
 			...parentThread,
 			messages: updatedMessages,
@@ -2042,6 +2009,21 @@ We only need to do it for files that were edited since `from`, ie files between 
 		this._setState({
 			allThreads: updatedThreads,
 			currentThreadId: parentThread.id
+		});
+
+		// Start generating the summary with streaming immediately
+		// The promise will resolve when the first streaming response arrives
+		return this.generateBranchSummaryStreaming(currentThread.messages, summaryNote, parentThread.id, updatedMessages.length - 1).catch(error => {
+			console.error('Failed to generate branch summary:', error);
+			// Fallback to simple summary
+			const fallbackMessage: ChatMessage = {
+				role: 'assistant',
+				displayContent: this.generateSimpleBranchSummary(currentThread.messages, summaryNote),
+				reasoning: `Branch summary from thread ${currentThread.id}`,
+				anthropicReasoning: null
+			};
+
+			this._editMessageInThread(parentThread.id, updatedMessages.length - 1, fallbackMessage);
 		});
 	}
 
@@ -2133,8 +2115,19 @@ Format the summary as a clear, structured overview that sets up the context for 
 **Next Steps:** Ready to dive deep into ${branchFocus.toLowerCase()} with full context of the current project state.`;
 	}
 
-	private async generateBranchSummary(messages: ChatMessage[], summaryFocus: string): Promise<string> {
-		console.log('🔄 Starting branch summary generation for focus:', summaryFocus);
+
+	private async generateBranchSummaryStreaming(messages: ChatMessage[], summaryFocus: string, parentThreadId: string, messageIndex: number): Promise<void> {
+		console.log('🔄 Starting streaming branch summary generation for focus:', summaryFocus);
+
+		// Add a placeholder message immediately
+		const placeholderMessage: ChatMessage = {
+			role: 'assistant',
+			displayContent: '',
+			reasoning: '',
+			anthropicReasoning: null
+		};
+
+		this._editMessageInThread(parentThreadId, messageIndex, placeholderMessage);
 
 		// Filter messages that have displayContent (user/assistant messages)
 		const messagesWithContent = messages.filter(m =>
@@ -2145,11 +2138,20 @@ Format the summary as a clear, structured overview that sets up the context for 
 
 		if (messagesWithContent.length === 0) {
 			console.log('⚠️ No messages with content, using simple summary');
-			return `📋 **Branch Summary**\n\n${summaryFocus}`;
+			// Update the parent thread with simple summary
+			const simpleMessage: ChatMessage = {
+				role: 'assistant',
+				displayContent: `📋 **Branch Summary**\n\n${summaryFocus}`,
+				reasoning: `Branch summary from thread`,
+				anthropicReasoning: null
+			};
+
+			this._editMessageInThread(parentThreadId, messageIndex, simpleMessage);
+			return;
 		}
 
 		try {
-			console.log('🤖 Attempting AI branch summary generation...');
+			console.log('🤖 Attempting streaming AI branch summary generation...');
 			// Get current model selection and settings
 			const featureName: FeatureName = 'Chat';
 			const modelSelection = this._settingsService.state.modelSelectionOfFeature[featureName];
@@ -2182,30 +2184,47 @@ Format the summary as a clear, structured overview that sets up the context for 
 				chatMode
 			});
 
-			// Make the LLM call for branch summarization
-			console.log('📞 Making LLM call for branch summary...');
-			const summary = await this.callLLMForBranchSummary({
+			// Make the streaming LLM call for branch summarization
+			console.log('📞 Making streaming LLM call for branch summary...');
+			await this.callLLMForBranchSummaryStreaming({
 				messages: llmMessages,
 				separateSystemMessage,
 				modelSelection,
 				modelSelectionOptions,
 				overridesOfModel,
-				chatMode
+				chatMode,
+				parentThreadId,
+				messageIndex
 			});
 
-			console.log('✅ AI branch summary generated successfully');
-			return summary;
+			console.log('✅ Streaming AI branch summary completed successfully');
 
 		} catch (error) {
-			console.error('Failed to generate AI branch summary:', error);
-			console.error('Error details:', error);
+			console.error('Failed to generate streaming AI branch summary:', error);
 			// Fallback to simple summary
-			return this.generateSimpleBranchSummary(messages, summaryFocus);
+			const fallbackMessage: ChatMessage = {
+				role: 'assistant',
+				displayContent: this.generateSimpleBranchSummary(messages, summaryFocus),
+				reasoning: `Branch summary from thread`,
+				anthropicReasoning: null
+			};
+
+			this._editMessageInThread(parentThreadId, messageIndex, fallbackMessage);
 		}
 	}
 
 	private async generateAIContextSummaryStreaming(messages: ChatMessage[], branchFocus: string, branchThreadId: string): Promise<void> {
 		console.log('🌿 Starting streaming AI context summary generation for branch focus:', branchFocus);
+
+		// Add a placeholder message immediately
+		const placeholderMessage: ChatMessage = {
+			role: 'assistant',
+			displayContent: '',
+			reasoning: '',
+			anthropicReasoning: null
+		};
+
+		this._editMessageInThread(branchThreadId, 0, placeholderMessage);
 
 		// Filter messages that have displayContent (user/assistant messages)
 		const messagesWithContent = messages.filter(m =>
@@ -2311,16 +2330,21 @@ Format the summary as a clear, structured overview that sets up the context for 
 Focus on essential information only. Avoid explaining how tools work or providing unnecessary technical details.`;
 	}
 
-	private async callLLMForBranchSummary(params: {
+
+	private async callLLMForBranchSummaryStreaming(params: {
 		messages: LLMChatMessage[];
 		separateSystemMessage: string | undefined;
 		modelSelection: ModelSelection | null;
 		modelSelectionOptions: ModelSelectionOptions | undefined;
 		overridesOfModel: OverridesOfModel | undefined;
 		chatMode: ChatMode | null;
-	}): Promise<string> {
-		console.log('🔄 Starting LLM call for branch summary...');
+		parentThreadId: string;
+		messageIndex: number;
+	}): Promise<void> {
+		console.log('🔄 Starting streaming LLM call for branch summary...');
+
 		return new Promise((resolve, reject) => {
+			let hasResolved = false;
 			const llmCancelToken = this._llmMessageService.sendLLMMessage({
 				messagesType: 'chatMessages',
 				chatMode: params.chatMode,
@@ -2330,23 +2354,46 @@ Focus on essential information only. Avoid explaining how tools work or providin
 				overridesOfModel: params.overridesOfModel,
 				separateSystemMessage: params.separateSystemMessage,
 				logging: {
-					loggingName: 'Branch Summary',
-					loggingExtras: { summaryFocus: 'branch-summary' }
+					loggingName: 'Branch Summary Streaming',
+					loggingExtras: { summaryFocus: 'branch-summary-streaming' }
 				},
-				onText: ({ fullText }) => {
-					// Stream the text as it comes in
-					console.log('📝 LLM streaming text...');
+				onText: ({ fullText, fullReasoning }) => {
+					// Update the message in the parent thread as text streams in
+					const streamingMessage: ChatMessage = {
+						role: 'assistant',
+						displayContent: fullText,
+						reasoning: fullReasoning || '',
+						anthropicReasoning: null
+					};
+
+					this._editMessageInThread(params.parentThreadId, params.messageIndex, streamingMessage);
+					console.log('📝 LLM streaming text for branch summary...');
+
+					// Resolve the promise on the first streaming response
+					if (!hasResolved) {
+						hasResolved = true;
+						resolve();
+					}
 				},
-				onFinalMessage: ({ fullText }) => {
-					console.log('✅ LLM call completed successfully');
-					resolve(fullText);
+				onFinalMessage: ({ fullText, fullReasoning }) => {
+					console.log('✅ Streaming LLM call completed successfully');
+					// Final update with complete text - preserve the reasoning from streaming
+					const finalMessage: ChatMessage = {
+						role: 'assistant',
+						displayContent: fullText,
+						reasoning: fullReasoning || '',
+						anthropicReasoning: null
+					};
+
+					this._editMessageInThread(params.parentThreadId, params.messageIndex, finalMessage);
+					resolve();
 				},
 				onError: async (error) => {
-					console.error('❌ LLM call failed:', error);
+					console.error('❌ Streaming LLM call failed:', error);
 					reject(new Error(`Branch summary generation failed: ${error.message}`));
 				},
 				onAbort: () => {
-					console.error('⏹️ LLM call was aborted');
+					console.error('⏹️ Streaming LLM call was aborted');
 					reject(new Error('Branch summary generation was aborted'));
 				}
 			});
@@ -2369,6 +2416,7 @@ Focus on essential information only. Avoid explaining how tools work or providin
 		console.log('🔄 Starting streaming LLM call for context summary...');
 
 		return new Promise((resolve, reject) => {
+			let hasResolved = false;
 			const llmCancelToken = this._llmMessageService.sendLLMMessage({
 				messagesType: 'chatMessages',
 				chatMode: params.chatMode,
@@ -2381,25 +2429,31 @@ Focus on essential information only. Avoid explaining how tools work or providin
 					loggingName: 'Branch Context Summary Streaming',
 					loggingExtras: { branchFocus: 'context-summary-streaming' }
 				},
-				onText: ({ fullText }) => {
+				onText: ({ fullText, fullReasoning }) => {
 					// Update the message in the branch as text streams in
 					const streamingMessage: ChatMessage = {
 						role: 'assistant',
 						displayContent: fullText,
-						reasoning: `Generating context summary for branch`,
+						reasoning: fullReasoning || '',
 						anthropicReasoning: null
 					};
 
 					this._editMessageInThread(params.branchThreadId, 0, streamingMessage);
 					console.log('📝 LLM streaming text for context summary...');
+
+					// Resolve the promise on the first streaming response
+					if (!hasResolved) {
+						hasResolved = true;
+						resolve();
+					}
 				},
-				onFinalMessage: ({ fullText }) => {
+				onFinalMessage: ({ fullText, fullReasoning }) => {
 					console.log('✅ Streaming LLM call completed successfully');
-					// Final update with complete text
+					// Final update with complete text - preserve the reasoning from streaming
 					const finalMessage: ChatMessage = {
 						role: 'assistant',
 						displayContent: fullText,
-						reasoning: `Branch created from parent thread with contextual summary`,
+						reasoning: fullReasoning || '',
 						anthropicReasoning: null
 					};
 
